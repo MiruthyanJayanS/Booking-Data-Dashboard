@@ -29,7 +29,7 @@ The AI-Powered Booking Analysis Dashboard is a comprehensive tool for cleaning, 
 Make sure you have Python 3.8+ installed. You will also need to install the following dependencies:
 
 ```bash
-pip install pandas plotly streamlit chromadb huggingface_hub google-generative-ai langchain
+pip install -r requirements.txt
 ```
 
 ### Clone the repository
