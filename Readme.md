@@ -35,8 +35,8 @@ pip install pandas plotly streamlit chromadb huggingface_hub google-generative-a
 ### Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/ai-booking-dashboard.git
-cd ai-booking-dashboard
+git clone https://github.com/MiruthyanJayanS/Booking-Data-Dashboard.git
+cd Booking-Data-Dashboard
 ```
 
 ### Set up ChromaDB and HuggingFace models
@@ -47,7 +47,10 @@ You will need to set up ChromaDB for data storage and HuggingFace embeddings for
 
 1. **Data Loading & Cleaning**:
    - Ensure your dataset is in Excel format and contains columns like 'Booking Date', 'Class Type', 'Instructor', 'Time Slot', 'Duration', 'Facility', and 'Theme'.
-   - Run the `clean_data()` function to clean and preprocess the data.
+   - Run the `cleandata.py` file to clean and preprocess the data.
+   ```bash
+   python cleandata.py
+   ```
    
 2. **Running the Dashboard**:
    - Launch the Streamlit web app by running:
