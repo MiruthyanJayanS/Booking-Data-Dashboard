@@ -11,6 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_huggingface import HuggingFaceEmbeddings
 
 st.set_page_config(page_title="Booking Analysis Dashboard", layout="wide")
+st.title("📊 Booking Data Dashboard")
 
 # Load environment variables
 load_dotenv()
@@ -31,31 +32,37 @@ def format_row(row):
         f"Price: {row['Price']}, Status: {row['Status']}, Contact: {row['Customer Email']} / {row['Customer Phone']}."
     )
 
-documents = df.apply(format_row, axis=1).tolist()
+# Radio button for selecting AI Chat feature
+ai_chat_selected = st.radio("Select Feature", ["Data Analysis", "AI-Powered Data Search"], horizontal=True)
 
-# Initialize ChromaDB
-chroma_client = chromadb.PersistentClient(path="chroma_db")
-collection = chroma_client.get_or_create_collection("booking_data")
+# Initialize variables only when AI chat is selected
+if ai_chat_selected == "AI-Powered Data Search":
+    # Initialize ChromaDB only if AI search is selected
+    chroma_client = chromadb.PersistentClient(path="chroma_db")
+    collection = chroma_client.get_or_create_collection("booking_data")
 
-# Generate embeddings
-embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-embeddings = embedding_model.embed_documents(documents)
+    # Generate embeddings
+    embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    documents = df.apply(format_row, axis=1).tolist()
+    embeddings = embedding_model.embed_documents(documents)
 
-# Store embeddings
-for i, doc in enumerate(documents):
-    collection.add(
-        ids=[str(df.loc[i, "Booking ID"])], 
-        embeddings=[embeddings[i]],
-        metadatas=[{"text": doc, "price": df.loc[i, "Price"], "status": df.loc[i, "Status"], 
-                    "service": df.loc[i, "Service Name"], "theme": df.loc[i, "Theme"], "date": df.loc[i, "Booking Date"], 
-                    "customer": df.loc[i, "Customer Name"], "instructor": df.loc[i, "Instructor"], "facility": df.loc[i, "Facility"]}]
-    )
-
-# Retrieve relevant records
-def retrieve_relevant_data(query, top_k=1000):
-    query_embedding = embedding_model.embed_query(query)
-    results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
-    return [res["text"] for res in results["metadatas"][0]]
+    # Store embeddings
+    for i, doc in enumerate(documents):
+        collection.add(
+            ids=[str(df.loc[i, "Booking ID"])],
+            embeddings=[embeddings[i]],
+            metadatas=[{
+                "text": doc,
+                "price": df.loc[i, "Price"],
+                "status": df.loc[i, "Status"],
+                "service": df.loc[i, "Service Name"],
+                "theme": df.loc[i, "Theme"],
+                "date": df.loc[i, "Booking Date"],
+                "customer": df.loc[i, "Customer Name"],
+                "instructor": df.loc[i, "Instructor"],
+                "facility": df.loc[i, "Facility"]
+            }]
+        )
 
 # Set up Gemini API
 chat_model = ChatGoogleGenerativeAI(api_key=API_KEY, model="gemini-1.5-pro", temperature=0.7)
@@ -81,6 +88,7 @@ def chat_prompt_template():
              "If the data is insufficient, indicate that explicitly and suggest potential areas to explore further or additional details that would improve the analysis.")
         ]
     )
+
 output_parser = StrOutputParser()
 chat_chain = chat_prompt_template() | chat_model | output_parser
 
@@ -97,104 +105,145 @@ def chat_bot(user_input):
     response = chat_chain.invoke({"human_input": user_input, "retrieved_data": retrieved_text})
     return response, retrieved_data
 
-st.title("📊 Booking Data Chatbot with Dashboard")
+# Retrieve relevant records
+def retrieve_relevant_data(query, top_k=1000):
+    query_embedding = embedding_model.embed_query(query)
+    results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
+    return [res["text"] for res in results["metadatas"][0]]
 
-# --- Radio Button for Data Selection ---
-view_option = st.radio("Choose Data View:", ["View All Data", "Apply Filters", "View Visuals"], horizontal=True)
-
-# Sidebar filters (only applied if 'Apply Filters' is selected)
-st.sidebar.header("Filters")
-
-if "filters_applied" not in st.session_state:
-    st.session_state["filters_applied"] = False
-    st.session_state["service_filter"] = []
-    st.session_state["status_filter"] = []
-    st.session_state["date_filter"] = []
-
-# Temporary filter selections (do not apply immediately)
-temp_service_filter = st.sidebar.multiselect("Select Service Type", df["Service Name"].unique(), default=st.session_state["service_filter"])
-temp_status_filter = st.sidebar.multiselect("Booking Status", df["Status"].unique(), default=st.session_state["status_filter"])
-temp_date_filter = st.sidebar.date_input("Select Date Range", value=st.session_state["date_filter"])
-
-if st.sidebar.button("Submit"):
-    st.session_state["filters_applied"] = True
-    st.session_state["service_filter"] = temp_service_filter
-    st.session_state["status_filter"] = temp_status_filter
-    st.session_state["date_filter"] = temp_date_filter
-
-# --- Data Filtering ---
-if view_option == "View All Data":
-    filtered_df = df.copy()
-    st.write("### Booking Data")
-    st.dataframe(filtered_df)
-
-elif view_option == "Apply Filters":
-    filtered_df = df.copy()
-    if st.session_state["filters_applied"]:
-        if st.session_state["service_filter"]:
-            filtered_df = filtered_df[filtered_df["Service Name"].isin(st.session_state["service_filter"])]
-        if st.session_state["status_filter"]:
-            filtered_df = filtered_df[filtered_df["Status"].isin(st.session_state["status_filter"])]
-        if st.session_state["date_filter"]:
-            filtered_df = filtered_df[
-                (df["Booking Date"] >= str(st.session_state["date_filter"][0])) & 
-                (df["Booking Date"] <= str(st.session_state["date_filter"][-1]))
-            ]
-    st.write("### Filtered Booking Data")
-    st.dataframe(filtered_df)
-
-elif view_option == "View Visuals":
-    st.write("### Booking Visualizations")
+# --- Data Selection --- 
+if ai_chat_selected == "Data Analysis":
     
-    # Booking Status Trends Over Time
-    df.groupby('Year-Month').size().plot(marker='o', linestyle='-')
-    df['Booking Date'] = pd.to_datetime(df['Booking Date'])
-    df['Booking Month'] = df['Booking Date'].dt.to_period('M').astype(str)
-    booking_status_counts = df.groupby(['Booking Month', 'Status'])['Booking ID'].count().unstack().reset_index()
-    booking_status_melted = booking_status_counts.melt(id_vars='Booking Month', var_name='Status', value_name='Count')
 
-    fig1 = px.line(booking_status_melted, x='Booking Month', y='Count', color='Status',
-                title='Booking Status Trends Over Time',
-                labels={"Booking Month": "Booking Month", "Count": "Number of Bookings"},
-                markers=True)
+    # --- Radio Button for Data Selection ---
+    view_option = st.radio("Choose Data View:", ["View All Data", "Apply Filters", "View Visuals"], horizontal=True)
 
-    fig1.update_xaxes(tickangle=45)
-    st.plotly_chart(fig1)
-    
-    # Distribution of Booking Types
-    fig2 = px.bar(
-    x=df['Booking Type'].value_counts().index,
-    y=df['Booking Type'].value_counts().values,
-    labels={'x': 'Booking Type', 'y': 'Count'},
-    title="Distribution of Booking Types"
-    )
-    st.plotly_chart(fig2)
+    # Sidebar filters (only applied if 'Apply Filters' is selected)
+    st.sidebar.header("Filters")
 
-    
-    # Price Distribution by Service Type
-    price_by_service_type = df.groupby('Service Name')['Price'].sum().reset_index()
+    if "filters_applied" not in st.session_state:
+        st.session_state["filters_applied"] = False
+        st.session_state["service_filter"] = []
+        st.session_state["status_filter"] = []
+        st.session_state["theme_filter"] = []
+        st.session_state["date_filter"] = []
 
-    fig3 = px.pie(price_by_service_type, names='Service Name', values='Price', 
-                title='Price Distribution by Service Type', hole=0.3)
+    # Temporary filter selections (do not apply immediately)
+    temp_service_filter = st.sidebar.multiselect("Select Service Type", df["Service Name"].unique(), default=st.session_state["service_filter"])
+    temp_status_filter = st.sidebar.multiselect("Booking Status", df["Status"].unique(), default=st.session_state["status_filter"])
+    temp_theme_filter = st.sidebar.multiselect("Select Theme", df["Theme"].unique(), default=st.session_state["theme_filter"])
+    temp_date_filter = st.sidebar.date_input("Select Date Range", value=st.session_state["date_filter"])
 
-    st.plotly_chart(fig3)
-    
-    # Revenue by Theme
-    theme_price = df.groupby('Theme')['Price'].sum().reset_index()
 
-    fig4 = px.pie(theme_price, names='Theme', values='Price', 
-                title='Price Distribution by Theme', hole=0.3)
+    if st.sidebar.button("Submit"):
+        st.session_state["filters_applied"] = True
+        st.session_state["service_filter"] = temp_service_filter
+        st.session_state["status_filter"] = temp_status_filter
+        st.session_state["theme_filter"] = temp_theme_filter
+        st.session_state["date_filter"] = temp_date_filter
 
-    st.plotly_chart(fig4)
-    
-    # Booking Trends by Service Type
-    fig5 = px.bar(df, x="Booking Date", y="Price", color="Service Name", title="Booking Trends by Service Type")
-    st.plotly_chart(fig5)
+    # --- Data Filtering ---
+    if view_option == "View All Data":
+        filtered_df = df.copy()
+        st.write("### Booking Data")
+        st.dataframe(filtered_df)
 
-st.write("### AI-Powered Data Search")
-user_input = st.text_input("Ask a question to retrive relevant booking data:")
-if st.button("Ask"):
-    with st.spinner("Analyzing data..."):
-        response, retrieved = chat_bot(user_input)
-        st.write("#### AI Response:")
+    elif view_option == "Apply Filters":
+        filtered_df = df.copy()
+        if st.session_state["filters_applied"]:
+            if st.session_state["service_filter"]:
+                filtered_df = filtered_df[filtered_df["Service Name"].isin(st.session_state["service_filter"])]
+            if st.session_state["status_filter"]:
+                filtered_df = filtered_df[filtered_df["Status"].isin(st.session_state["status_filter"])]
+            if st.session_state["theme_filter"]:
+                filtered_df = filtered_df[filtered_df["Theme"].isin(st.session_state["theme_filter"])]
+            if st.session_state["date_filter"]:
+                filtered_df = filtered_df[
+                    (df["Booking Date"] >= str(st.session_state["date_filter"][0])) & 
+                    (df["Booking Date"] <= str(st.session_state["date_filter"][-1]))
+                ]
+        st.write("### Filtered Booking Data")
+        st.dataframe(filtered_df)
+
+        # If there is any filtered data, generate the charts
+        if not filtered_df.empty:
+            # Booking Trends by Service Type
+            fig0 = px.bar(
+                filtered_df,
+                x="Booking Date",
+                y="Price",
+                color="Service Name",
+                title="Booking Trends by Service Type",
+                labels={"Booking Date": "Booking Date", "Price": "Price"},
+            )
+            st.plotly_chart(fig0)
+
+            # Distribution of Booking Types
+            fig2 = px.bar(
+                x=filtered_df['Booking Type'].value_counts().index,
+                y=filtered_df['Booking Type'].value_counts().values,
+                labels={'x': 'Booking Type', 'y': 'Count'},
+                title="Distribution of Booking Types"
+            )
+            st.plotly_chart(fig2)
+
+            # Price Distribution by Service Type
+            price_by_service_type = filtered_df.groupby('Service Name')['Price'].sum().reset_index()
+            fig3 = px.pie(price_by_service_type, names='Service Name', values='Price', 
+                        title='Price Distribution by Service Type', hole=0.3)
+            st.plotly_chart(fig3)
+
+            # Revenue by Theme
+            theme_price = filtered_df.groupby('Theme')['Price'].sum().reset_index()
+            fig4 = px.pie(theme_price, names='Theme', values='Price', 
+                        title='Revenue by Theme', hole=0.3)
+            st.plotly_chart(fig4)
+        else:
+            st.write("No data available for the selected filters.")
+
+    elif view_option == "View Visuals":
+        st.write("### Booking Visualizations")
+
+        # Booking Status Trends Over Time
+        df.groupby('Year-Month').size().plot(marker='o', linestyle='-')
+        df['Booking Date'] = pd.to_datetime(df['Booking Date'])
+        df['Booking Month'] = df['Booking Date'].dt.to_period('M').astype(str)
+        booking_status_counts = df.groupby(['Booking Month', 'Status'])['Booking ID'].count().unstack().reset_index()
+        booking_status_melted = booking_status_counts.melt(id_vars='Booking Month', var_name='Status', value_name='Count')
+
+        fig1 = px.line(booking_status_melted, x='Booking Month', y='Count', color='Status',
+                    title='Booking Status Trends Over Time',
+                    labels={"Booking Month": "Booking Month", "Count": "Number of Bookings"},
+                    markers=True)
+
+        fig1.update_xaxes(tickangle=45)
+        st.plotly_chart(fig1)
+        
+        # Distribution of Booking Types
+        fig2 = px.bar(
+        x=df['Booking Type'].value_counts().index,
+        y=df['Booking Type'].value_counts().values,
+        labels={'x': 'Booking Type', 'y': 'Count'},
+        title="Distribution of Booking Types"
+        )
+        st.plotly_chart(fig2)
+        # Price Distribution by Service Type
+        price_by_service_type = df.groupby('Service Name')['Price'].sum().reset_index()
+        fig3 = px.pie(price_by_service_type, names='Service Name', values='Price', 
+                    title='Price Distribution by Service Type', hole=0.3)
+        st.plotly_chart(fig3)
+        # Revenue by Theme
+        theme_price = df.groupby('Theme')['Price'].sum().reset_index()
+        fig4 = px.pie(theme_price, names='Theme', values='Price', 
+                    title='Price Distribution by Theme', hole=0.3)
+        st.plotly_chart(fig4)
+
+# --- AI Chat ---
+if ai_chat_selected == "AI-Powered Data Search":
+    st.title("🔍 AI-Powered Data Search")
+
+    # User input for the query
+    user_input = st.text_input("Ask a question about dataset:")
+    if user_input:
+        response, retrieved_data = chat_bot(user_input)
         st.write(response)

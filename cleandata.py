@@ -40,7 +40,10 @@ def clean_data(df):
     # Step 4: Fill missing 'Theme' for 'Birthday Party' bookings
     df_clean.loc[df_clean['Booking Type'] == 'Birthday Party', 'Theme'] = df_clean['Theme'].fillna('No Theme Specified')
 
-    # Step 5: Extract year-month for trend analysis
+    # step 5: Fill missing 'Theme'
+    df_clean['Theme'] = df_clean['Theme'].fillna('No Theme Specified')
+
+    # Step 6: Extract year-month for trend analysis
     df_clean['Year-Month'] = df_clean['Booking Date'].dt.to_period('M')
     
     return df_clean
